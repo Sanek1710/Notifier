@@ -57,6 +57,18 @@ class SqlClient:
             print_tb(e)
             raise(e)
         return result
+    def getEventById(self, userId):
+        result = []
+        try:
+            with self.connection.cursor() as cursor:
+                sql = "SELECT `*` FROM `events` WHERE userID=%s"
+                cursor.execute(sql,(str(userId)))
+                result = cursor.fetchall()
+        except Exception as e:
+            print_tb(e)
+            raise(e)
+        return result        
+
 def write_msg(user_id,random_id, message):
     vk.messages.send(user_id=user_id,random_id=random_id,message=message)
 def print_tb(e):
