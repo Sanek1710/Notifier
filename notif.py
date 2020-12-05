@@ -166,7 +166,7 @@ if __name__ == "__main__":
                         write_msg(event.user_id,event.random_id,str(e))
                     except Exception as e:
                         print_tb(e)
-                        write_msg(event.user_id,event.random_id,'Что-то пошло не так:')
+                        write_msg(event.user_id,event.random_id,'Что-то пошло не так:' + e)
                 else:
                     write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
                     sqlClient.addUser(event.user_id)
