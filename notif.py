@@ -9,7 +9,7 @@ import datetime
 import traceback
 from vk_api.longpoll import VkLongPoll, VkEventType
 import pymysql.cursors
-#events:[userId:str,randomId:str,timestamp:str,message:str,everyYear:bool]
+import argparse
 class SqlClient:
     def __init__(self,configFile):
         with open(configFile,'r') as file:
@@ -97,74 +97,78 @@ def dateToTimestamp(dateTimeStr,formatString):
         return time.mktime(datetime.datetime.strptime(datetimeStr,formatString ).timetuple())
     except ValueError:
         raise ValueError("Неверный формат даты")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--token', type=str,
+                        help='your vk group token')
+    parser.add_argument('--dbConfig',
+                        help='path to config db file')
+    args = parser.parse_args()
+    vk_session = vk_api.VkApi(token=args.token)
+    longpoll = VkLongPoll(vk_session)
+    vk = vk_session.get_api()
+    sqlClient = SqlClient(args.dbConfig)
+    usersList = sqlClient.getUsers()
+    print(usersList)
 
-token='***REMOVED***'
+    #my_thread = threading.Thread(target=dateChecking)
+    #my_thread.start()
+    # Основной цикл
+    for event in longpoll.listen():
+        # Если пришло новое сообщение
+        print (event.type)
+        if event.type == VkEventType.MESSAGE_NEW:
+        
+            # Если оно имеет метку для меня( то есть бота)
+            if event.to_me:
+                if str(event.user_id) in usersList:
+                    try:
+                        request = event.text.split()
 
-vk_session = vk_api.VkApi(token=token)
-longpoll = VkLongPoll(vk_session)
-vk = vk_session.get_api()
-sqlClient = SqlClient("db.txt")
-usersList = sqlClient.getUsers()
-print(usersList)
-
-#my_thread = threading.Thread(target=dateChecking)
-#my_thread.start()
-# Основной цикл
-for event in longpoll.listen():
-    # Если пришло новое сообщение
-    print (event.type)
-    if event.type == VkEventType.MESSAGE_NEW:
-    
-        # Если оно имеет метку для меня( то есть бота)
-        if event.to_me:
-            if str(event.user_id) in usersList:
-                try:
-                    request = event.text.split()
-
-                    print(event.user_id,event.random_id)
-                    if request[0] == "help":
-                        write_msg(event.user_id,event.random_id,getHelpMessage())
-                    elif request[0] == "add":
-                        dateStr = request[1]
-                        timeStr = request[2]
-                        newEvent = {}
-                        now = datetime.datetime.now()
-                        print(now.year)
-                        formatString = "%d.%m.%Y %H:%M"
-                        datetimeStr = dateStr+ ' ' + timeStr
-                        if len(dateStr) > 5:
-                            newEvent['everyYear'] = False
-                            timestamp = dateToTimestamp(datetimeStr,formatString)
-                        else:
-                            newEvent['everyYear'] = True
-                            checkDateTimeStr = dateStr + '.' + str(now.year) + ' ' + timeStr
-                            checkTimestamp = dateToTimestamp(checkDateTimeStr,formatString)
-                            if checkTimestamp > now.timestamp():
-                                timestamp = checkTimestamp
+                        print(event.user_id,event.random_id)
+                        if request[0] == "help":
+                            write_msg(event.user_id,event.random_id,getHelpMessage())
+                        elif request[0] == "add":
+                            dateStr = request[1]
+                            timeStr = request[2]
+                            newEvent = {}
+                            now = datetime.datetime.now()
+                            print(now.year)
+                            formatString = "%d.%m.%Y %H:%M"
+                            datetimeStr = dateStr+ ' ' + timeStr
+                            if len(dateStr) > 5:
+                                newEvent['everyYear'] = False
+                                timestamp = dateToTimestamp(datetimeStr,formatString)
                             else:
-                                checkDateTimeStr = dateStr + '.' + str(now.year + 1) + ' ' + timeStr
-                                timestamp =dateToTimestamp(checkDateTimeStr,formatString)                      
-                                               
-                        del request[0:3]
-                        message = (''.join(x + ' ' for x in request))
-                        #events:[user_id:str,random_id:str,timestamp:str,message:str,everyYear:bool]
-                        newEvent['userId'] = event.user_id
-                        newEvent['randomId'] = event.random_id
-                        newEvent['timestamp'] = timestamp
-                        newEvent['message'] = message[:-1]
-                        sqlClient.addEvent(newEvent)             
-                        write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
-                    elif request[0] == "print":
-                        write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventById(event.user_id)))
-                    else:
-                        write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
-                except ValueError as e:
-                    write_msg(event.user_id,event.random_id,str(e))
-                except Exception as e:
-                    print_tb(e)
-                    write_msg(event.user_id,event.random_id,'Что-то пошло не так:')
-            else:
-                write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
-                sqlClient.addUser(event.user_id)
-                usersList.append(str(event.user_id))
+                                newEvent['everyYear'] = True
+                                checkDateTimeStr = dateStr + '.' + str(now.year) + ' ' + timeStr
+                                checkTimestamp = dateToTimestamp(checkDateTimeStr,formatString)
+                                if checkTimestamp > now.timestamp():
+                                    timestamp = checkTimestamp
+                                else:
+                                    checkDateTimeStr = dateStr + '.' + str(now.year + 1) + ' ' + timeStr
+                                    timestamp =dateToTimestamp(checkDateTimeStr,formatString)                      
+                                                
+                            del request[0:3]
+                            message = (''.join(x + ' ' for x in request))
+                            #events:[user_id:str,random_id:str,timestamp:str,message:str,everyYear:bool]
+                            newEvent['userId'] = event.user_id
+                            newEvent['randomId'] = event.random_id
+                            newEvent['timestamp'] = timestamp
+                            newEvent['message'] = message[:-1]
+                            sqlClient.addEvent(newEvent)             
+                            write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
+                        elif request[0] == "print":
+                            write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventById(event.user_id)))
+                        else:
+                            write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
+                    except ValueError as e:
+                        write_msg(event.user_id,event.random_id,str(e))
+                    except Exception as e:
+                        print_tb(e)
+                        write_msg(event.user_id,event.random_id,'Что-то пошло не так:')
+                else:
+                    write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
+                    sqlClient.addUser(event.user_id)
+                    usersList.append(str(event.user_id))
 
