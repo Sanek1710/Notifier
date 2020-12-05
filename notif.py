@@ -71,6 +71,7 @@ class SqlClient:
 
 def write_msg(user_id,random_id, message):
     vk.messages.send(user_id=user_id,random_id=random_id,message=message)
+    print("Sending to user=" + str(user_id) + " message " + message)
 def print_tb(e):
     print (''.join(traceback.TracebackException.from_exception(e).format()))
 def getHelpMessage():
@@ -82,6 +83,21 @@ def getHelpMessage():
     msg+= '\nПримеры:\nadd 05.02.2021 12:00 День рождения Юли\n25 февраля в 12 часов дня по мск в 2021 году тебе придет напоминание от меня с текстом "Напоминаю: сегодня - День рождения Юли"'
     msg+= '\nadd 29.11 10:00 День матери\nКаждый год 29 ноября в 10 часов дня по мск тебе будет приходить напоминание от меня с текстом "Напоминаю: сегодня - День матери"'
     return msg
+def formatEvents(events):
+    resStr = ""
+    index = 1
+    for event in events:
+        resStr += (str(index) + ") " + timestampToDate(event["timestamp"]) + " " + event["message"] + '\n')
+        index += 1
+    return resStr
+def timestampToDate(timestamp):
+    return str(datetime.datetime.fromtimestamp(timestamp))
+def dateToTimestamp(dateTimeStr,formatString):
+    try:
+        return time.mktime(datetime.datetime.strptime(datetimeStr,formatString ).timetuple())
+    except ValueError:
+        raise ValueError("Неверный формат даты")
+
 token='9ff67bec81a05eded4e87077f09ec65399d330a0a78e39bba9596c0295ba4c3c757a0ce6004d44f8b3664'
 
 vk_session = vk_api.VkApi(token=token)
@@ -118,16 +134,16 @@ for event in longpoll.listen():
                         datetimeStr = dateStr+ ' ' + timeStr
                         if len(dateStr) > 5:
                             newEvent['everyYear'] = False
-                            timestamp = time.mktime(datetime.datetime.strptime(datetimeStr,formatString ).timetuple())
+                            timestamp = dateToTimestamp(datetimeStr,formatString)
                         else:
                             newEvent['everyYear'] = True
                             checkDateTimeStr = dateStr + '.' + str(now.year) + ' ' + timeStr
-                            checkTimestamp = time.mktime(datetime.datetime.strptime(checkDateTimeStr,formatString ).timetuple())
+                            checkTimestamp = dateToTimestamp(checkDateTimeStr,formatString)
                             if checkTimestamp > now.timestamp():
                                 timestamp = checkTimestamp
                             else:
                                 checkDateTimeStr = dateStr + '.' + str(now.year + 1) + ' ' + timeStr
-                                timestamp = time.mktime(datetime.datetime.strptime(checkDateTimeStr,formatString ).timetuple())                        
+                                timestamp =dateToTimestamp(checkDateTimeStr,formatString)                      
                                                
                         del request[0:3]
                         message = (''.join(x + ' ' for x in request))
@@ -139,15 +155,16 @@ for event in longpoll.listen():
                         sqlClient.addEvent(newEvent)             
                         write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
                     elif request[0] == "print":
-                        print(sqlClient.getEventById(event.user_id))
-                        write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
+                        write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventById(event.user_id)))
                     else:
                         write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
+                except ValueError as e:
+                    write_msg(event.user_id,event.random_id,str(e))
                 except Exception as e:
                     print_tb(e)
-                    write_msg(event.user_id,event.random_id,'Что-то пошло не так')
+                    write_msg(event.user_id,event.random_id,'Что-то пошло не так:')
             else:
                 write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
                 sqlClient.addUser(event.user_id)
-                usersList.append(event.user_id)
+                usersList.append(str(event.user_id))
 
