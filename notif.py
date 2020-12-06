@@ -1,15 +1,42 @@
 import requests
 import vk_api
 import sys
-import threading
+from threading import Thread, Lock
 import os
-import json
 import time
 import datetime
 import traceback
 from vk_api.longpoll import VkLongPoll, VkEventType
 import pymysql.cursors
 import argparse
+def exceptionDecorator(func):
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            print_tb(e)
+            raise (e)
+    return wrapper
+@exceptionDecorator
+def sendNotifies(events):
+    for event in events:
+        write_msg(event["userId"],event["randomId"],"Напоминаю: сегодня -" + event["message"])
+
+def notifierThread(nextTimeNotify,sqlClient,lock):
+    while True:
+        lock.acquire()
+        if datetime.datetime.now().timestamp() >= nextTimeNotify[0]:
+            try:
+                events = sqlClient.getEventsByTimestamp(nextTimeNotify[0])
+                sendNotifies(events)
+                sqlClient.clearEventsByEvents(events)
+                nextTimeNotify[0] = sqlClient.getMinTimestamp()
+            except Exception as e:
+                print_tb(e)
+                pass
+        lock.release()
+        time.sleep(1)
+
 class SqlClient:
     def __init__(self,configFile):
         with open(configFile,'r') as file:
@@ -18,57 +45,70 @@ class SqlClient:
             user = content[1]
             password = content[2]
             db = content[3]
-        print (host)
-        print(user)
-        print(password)
-        print (db)
         self.connection = pymysql.connect(host=host,
                              user=user,
                              password=password,
                              db=db,
                              charset='utf8mb4',
                              cursorclass=pymysql.cursors.DictCursor)
+    @exceptionDecorator
     def addUser(self,userId):
-        try:
-            with self.connection.cursor() as cursor:
-                sql = "INSERT INTO `users` (`userId`) VALUES (%s)"
-                cursor.execute(sql, (userId)) 
-            self.connection.commit()
-        except Exception as e:
-            print_tb(e)
-            raise(e)
+        with self.connection.cursor() as cursor:
+            sql = "INSERT INTO `users` (`userId`) VALUES (%s)"
+            cursor.execute(sql, (userId)) 
+        self.connection.commit()
+    @exceptionDecorator
     def addEvent(self,event):
-        try:
-            with self.connection.cursor() as cursor:
-                sql = "INSERT INTO `events` (`userId`, `randomId`, `timestamp`,`message`,`everyYear`) VALUES (%s,%s,%s,%s,%s)"
-                cursor.execute(sql, (event['userId'],event['randomId'],event['timestamp'],event['message'],event['everyYear'])) 
-            self.connection.commit()
-        except Exception as e:
-            print_tb(e)
-            raise(e)
+        with self.connection.cursor() as cursor:
+            sql = "INSERT INTO `events` (`userId`, `randomId`, `timestamp`,`message`,`everyYear`) VALUES (%s,%s,%s,%s,%s)"
+            cursor.execute(sql, (event['userId'],event['randomId'],event['timestamp'],event['message'],event['everyYear'])) 
+        self.connection.commit()
+    @exceptionDecorator
     def getUsers(self):
         result = []
-        try:
-            with self.connection.cursor() as cursor:
-                sql = "SELECT `userId` FROM `users`"
-                cursor.execute(sql)
-                result = [x['userId'] for x in cursor.fetchall()]
-        except Exception as e:
-            print_tb(e)
-            raise(e)
+        with self.connection.cursor() as cursor:
+            sql = "SELECT `userId` FROM `users`"
+            cursor.execute(sql)
+            result = [x['userId'] for x in cursor.fetchall()]
         return result
-    def getEventById(self, userId):
+    @exceptionDecorator
+    def getEventByUserId(self, userId):
         result = []
-        try:
-            with self.connection.cursor() as cursor:
-                sql = "SELECT `*` FROM `events` WHERE userID=%s"
-                cursor.execute(sql,(str(userId)))
-                result = cursor.fetchall()
-        except Exception as e:
-            print_tb(e)
-            raise(e)
-        return result        
-
+        with self.connection.cursor() as cursor:
+            sql = "SELECT `*` FROM `events` WHERE userID=%s"
+            cursor.execute(sql,(str(userId)))
+            result = cursor.fetchall()
+        return result  
+    @exceptionDecorator      
+    def getEventsByTimestamp(self,timestamp):   
+        result = []
+        with self.connection.cursor() as cursor:
+            sql = "SELECT `*` FROM `events` WHERE timestamp=%s"
+            cursor.execute(sql,(str(timestamp)))
+            result = cursor.fetchall()
+        return result 
+    @exceptionDecorator
+    def clearEventsByEvents(self,events):
+        with self.connection.cursor() as cursor:
+            sqlDel = "DELETE FROM `events` WHERE id=%s"
+            sqlUpdate = "UPDATE `events` SET timestamp = %s WHERE id=%s"
+            for event in events:
+                if event["everyYear"] == False:
+                    cursor.execute(sqlDel, (event["id"])) 
+                else:
+                    startDate =  datetime.datetime.fromtimestamp(event["timestamp"])
+                    newDate = startDate.replace(startDate.year + 1)
+                    newTimestamp =newDate.timestamp()
+                    cursor.execute(sqlUpdate, (newTimestamp,event["id"])) 
+        self.connection.commit()
+    @exceptionDecorator
+    def getMinTimestamp(self):
+        with self.connection.cursor() as cursor:
+            sql = "SELECT MIN(timestamp) as min_timestamp FROM `events`"
+            cursor.execute(sql)
+            result = cursor.fetchone()
+            return result['min_timestamp']
+        self.connection.commit()   
 def write_msg(user_id,random_id, message):
     vk.messages.send(user_id=user_id,random_id=random_id,message=message)
     print("Sending to user=" + str(user_id) + " message " + message)
@@ -94,8 +134,9 @@ def timestampToDate(timestamp):
     return str(datetime.datetime.fromtimestamp(timestamp))
 def dateToTimestamp(dateTimeStr,formatString):
     try:
-        return time.mktime(datetime.datetime.strptime(datetimeStr,formatString ).timetuple())
-    except ValueError:
+        return time.mktime(datetime.datetime.strptime(dateTimeStr,formatString).timetuple())
+    except ValueError as e:
+        print_tb(e)
         raise ValueError("Неверный формат даты")
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -109,14 +150,15 @@ if __name__ == "__main__":
     vk = vk_session.get_api()
     sqlClient = SqlClient(args.dbConfig)
     usersList = sqlClient.getUsers()
-    print(usersList)
-
-    #my_thread = threading.Thread(target=dateChecking)
-    #my_thread.start()
+    lock = Lock()
+    nextTime =[]
+    minTime = int(sqlClient.getMinTimestamp())
+    nextTime.append(minTime)
+    notifierWorker = Thread(target=notifierThread,args=(nextTime,sqlClient,lock,))
+    notifierWorker.start()
     # Основной цикл
     for event in longpoll.listen():
         # Если пришло новое сообщение
-        print (event.type)
         if event.type == VkEventType.MESSAGE_NEW:
         
             # Если оно имеет метку для меня( то есть бота)
@@ -124,8 +166,6 @@ if __name__ == "__main__":
                 if str(event.user_id) in usersList:
                     try:
                         request = event.text.split()
-
-                        print(event.user_id,event.random_id)
                         if request[0] == "help":
                             write_msg(event.user_id,event.random_id,getHelpMessage())
                         elif request[0] == "add":
@@ -133,7 +173,6 @@ if __name__ == "__main__":
                             timeStr = request[2]
                             newEvent = {}
                             now = datetime.datetime.now()
-                            print(now.year)
                             formatString = "%d.%m.%Y %H:%M"
                             datetimeStr = dateStr+ ' ' + timeStr
                             if len(dateStr) > 5:
@@ -151,22 +190,24 @@ if __name__ == "__main__":
                                                 
                             del request[0:3]
                             message = (''.join(x + ' ' for x in request))
-                            #events:[user_id:str,random_id:str,timestamp:str,message:str,everyYear:bool]
                             newEvent['userId'] = event.user_id
                             newEvent['randomId'] = event.random_id
                             newEvent['timestamp'] = timestamp
                             newEvent['message'] = message[:-1]
-                            sqlClient.addEvent(newEvent)             
+                            sqlClient.addEvent(newEvent)
+                            lock.acquire()
+                            nextTime[0] = sqlClient.getMinTimestamp()
+                            lock.release()             
                             write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
                         elif request[0] == "print":
-                            write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventById(event.user_id)))
+                            write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventByUserId(event.user_id)))
                         else:
                             write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
                     except ValueError as e:
                         write_msg(event.user_id,event.random_id,str(e))
                     except Exception as e:
                         print_tb(e)
-                        write_msg(event.user_id,event.random_id,'Что-то пошло не так:' + e)
+                        write_msg(event.user_id,event.random_id,'Что-то пошло не так')
                 else:
                     write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
                     sqlClient.addUser(event.user_id)
