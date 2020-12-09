@@ -102,6 +102,18 @@ class SqlClient:
                     cursor.execute(sqlUpdate, (newTimestamp,event["id"])) 
         self.connection.commit()
     @exceptionDecorator
+    def clearEventsByTimestamp(self,timestamp,userId):
+        with self.connection.cursor() as cursor:
+            sqlDel = "DELETE FROM `events` WHERE id=%s and timestamp=%s"
+            cursor.execute(sqlDel, (userId,timestamp)) 
+        self.connection.commit()
+    @exceptionDecorator
+    def clearAllEvents(self,userId):
+        with self.connection.cursor() as cursor:
+            sqlDel = "DELETE FROM `events` WHERE id=%s"
+            cursor.execute(sqlDel, (userId)) 
+        self.connection.commit()
+    @exceptionDecorator
     def getMinTimestamp(self):
         with self.connection.cursor() as cursor:
             sql = "SELECT MIN(timestamp) as min_timestamp FROM `events`"
@@ -123,6 +135,23 @@ def getHelpMessage():
     msg+= '\nПримеры:\nadd 05.02.2021 12:00 День рождения Юли\n25 февраля в 12 часов дня по мск в 2021 году тебе придет напоминание от меня с текстом "Напоминаю: сегодня - День рождения Юли"'
     msg+= '\nadd 29.11 10:00 День матери\nКаждый год 29 ноября в 10 часов дня по мск тебе будет приходить напоминание от меня с текстом "Напоминаю: сегодня - День матери"'
     return msg
+def userInputToTimestamp(dateStr,timeStr):
+    now = datetime.datetime.now()
+    formatString = "%d.%m.%Y %H:%M"
+    datetimeStr = dateStr+ ' ' + timeStr
+    if len(dateStr) > 5:
+        newEvent['everyYear'] = False
+        timestamp = dateToTimestamp(datetimeStr,formatString)
+    else:
+        newEvent['everyYear'] = True
+        checkDateTimeStr = dateStr + '.' + str(now.year) + ' ' + timeStr
+        checkTimestamp = dateToTimestamp(checkDateTimeStr,formatString)
+        if checkTimestamp > now.timestamp():
+            timestamp = checkTimestamp
+        else:
+            checkDateTimeStr = dateStr + '.' + str(now.year + 1) + ' ' + timeStr
+            timestamp =dateToTimestamp(checkDateTimeStr,formatString)
+    return timestamp                                                    
 def formatEvents(events):
     resStr = ""
     index = 1
@@ -156,60 +185,54 @@ if __name__ == "__main__":
     nextTime.append(minTime)
     notifierWorker = Thread(target=notifierThread,args=(nextTime,sqlClient,lock,))
     notifierWorker.start()
-    # Основной цикл
-    for event in longpoll.listen():
-        # Если пришло новое сообщение
-        if event.type == VkEventType.MESSAGE_NEW:
-        
-            # Если оно имеет метку для меня( то есть бота)
-            if event.to_me:
-                if str(event.user_id) in usersList:
-                    try:
-                        request = event.text.split()
-                        if request[0] == "help":
-                            write_msg(event.user_id,event.random_id,getHelpMessage())
-                        elif request[0] == "add":
-                            dateStr = request[1]
-                            timeStr = request[2]
-                            newEvent = {}
-                            now = datetime.datetime.now()
-                            formatString = "%d.%m.%Y %H:%M"
-                            datetimeStr = dateStr+ ' ' + timeStr
-                            if len(dateStr) > 5:
-                                newEvent['everyYear'] = False
-                                timestamp = dateToTimestamp(datetimeStr,formatString)
-                            else:
-                                newEvent['everyYear'] = True
-                                checkDateTimeStr = dateStr + '.' + str(now.year) + ' ' + timeStr
-                                checkTimestamp = dateToTimestamp(checkDateTimeStr,formatString)
-                                if checkTimestamp > now.timestamp():
-                                    timestamp = checkTimestamp
+    while True:
+        try:
+            for event in longpoll.listen():
+                if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+                    if str(event.user_id) in usersList:
+                        try:
+                            request = event.text.split()
+                            if request[0] == "help":
+                                write_msg(event.user_id,event.random_id,getHelpMessage())
+                            elif request[0] == "add":
+                                newEvent = {}
+                                dateStr = request[1]
+                                timeStr = request[2]
+                                timestamp = userInputToTimestamp(dateStr,timeStr)
+                                del request[0:3]
+                                message = (''.join(x + ' ' for x in request))
+                                newEvent['userId'] = event.user_id
+                                newEvent['randomId'] = event.random_id
+                                newEvent['timestamp'] = timestamp
+                                newEvent['message'] = message[:-1]
+                                sqlClient.addEvent(newEvent)
+                                lock.acquire()
+                                nextTime[0] = sqlClient.getMinTimestamp()
+                                lock.release()             
+                                write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
+                            elif request[0] == "print":
+                                write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventByUserId(event.user_id)))
+                            elif request[0] == "delete":
+                                if request[1] == "all":
+                                    sqlClient.clearAllEvents(event.user_id)
+                                    write_msg(event.user_id,event.random_id, "Все события удалены!")
                                 else:
-                                    checkDateTimeStr = dateStr + '.' + str(now.year + 1) + ' ' + timeStr
-                                    timestamp =dateToTimestamp(checkDateTimeStr,formatString)                      
-                                                
-                            del request[0:3]
-                            message = (''.join(x + ' ' for x in request))
-                            newEvent['userId'] = event.user_id
-                            newEvent['randomId'] = event.random_id
-                            newEvent['timestamp'] = timestamp
-                            newEvent['message'] = message[:-1]
-                            sqlClient.addEvent(newEvent)
-                            lock.acquire()
-                            nextTime[0] = sqlClient.getMinTimestamp()
-                            lock.release()             
-                            write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
-                        elif request[0] == "print":
-                            write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventByUserId(event.user_id)))
-                        else:
-                            write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
-                    except ValueError as e:
-                        write_msg(event.user_id,event.random_id,str(e))
-                    except Exception as e:
-                        print_tb(e)
-                        write_msg(event.user_id,event.random_id,'Что-то пошло не так')
-                else:
-                    write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
-                    sqlClient.addUser(event.user_id)
-                    usersList.append(str(event.user_id))
+                                    dateStr = request[1]
+                                    timeStr = request[2]
+                                    timestamp = userInputToTimestamp(dateStr,timeStr)
+                                    sqlClient.clearEventsByTimestamp(timestamp,event.user_id)
+                                    write_msg(event.user_id,event.random_id, "Событие удалено!")                                                          
+                            else:
+                                write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
+                        except ValueError as e:
+                            write_msg(event.user_id,event.random_id,str(e))
+                        except Exception as e:
+                            print_tb(e)
+                            write_msg(event.user_id,event.random_id,'Что-то пошло не так')
+                    else:
+                        write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
+                        sqlClient.addUser(event.user_id)
+                        usersList.append(str(event.user_id))
+        except Exception as e:
+            print_tb(e)
 
