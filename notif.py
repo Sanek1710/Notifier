@@ -75,7 +75,7 @@ class SqlClient:
     def getEventByUserId(self, userId):
         result = []
         with self.connection.cursor() as cursor:
-            sql = "SELECT `*` FROM `events` WHERE userID=%s"
+            sql = "SELECT * FROM `events` WHERE userID=%s"
             cursor.execute(sql,(str(userId)))
             result = cursor.fetchall()
         return result  
@@ -83,7 +83,7 @@ class SqlClient:
     def getEventsByTimestamp(self,timestamp):   
         result = []
         with self.connection.cursor() as cursor:
-            sql = "SELECT `*` FROM `events` WHERE timestamp=%s"
+            sql = "SELECT * FROM `events` WHERE timestamp=%s"
             cursor.execute(sql,(str(timestamp)))
             result = cursor.fetchall()
         return result 
