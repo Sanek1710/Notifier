@@ -9,6 +9,7 @@ import traceback
 from vk_api.longpoll import VkLongPoll, VkEventType
 import pymysql.cursors
 import argparse
+import configparser
 def exceptionDecorator(func):
     def wrapper(*args, **kwargs):
         try:
@@ -39,16 +40,13 @@ def notifierThread(nextTimeNotify,sqlClient,lock):
 
 class SqlClient:
     def __init__(self,configFile):
-        with open(configFile,'r') as file:
-            content = file.read().split(" ")
-            host = content[0]
-            user = content[1]
-            password = content[2]
-            db = content[3]
-        self.connection = pymysql.connect(host=host,
-                             user=user,
-                             password=password,
-                             db=db,
+        config = configparser.ConfigParser()
+        config.read(configFile)
+        db_config = config["DB"]
+        self.connection = pymysql.connect(host=db_config["host"],
+                             user=db_config["user"],
+                             password=db_config["password"],
+                             db=db_config["db"],
                              charset='utf8mb4',
                              cursorclass=pymysql.cursors.DictCursor)
     @exceptionDecorator
