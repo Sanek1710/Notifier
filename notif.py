@@ -100,15 +100,19 @@ class SqlClient:
                     cursor.execute(sqlUpdate, (newTimestamp,event["id"])) 
         self.connection.commit()
     @exceptionDecorator
-    def clearEventsByTimestamp(self,timestamp,userId):
+    def clearEventsByIndex(self,index,userId):
+        events = self.getEventByUserId(userId)
+        if (index < 0 or index >= len(events)): #for userfriendly i-face
+            print("Incorrect index with size=", len(events))
+            raise IndexError()
         with self.connection.cursor() as cursor:
-            sqlDel = "DELETE FROM `events` WHERE id=%s and timestamp=%s"
-            cursor.execute(sqlDel, (userId,timestamp)) 
+            sqlDel = "DELETE FROM `events` WHERE id=%s"
+            cursor.execute(sqlDel, (events[index]["id"]))
         self.connection.commit()
     @exceptionDecorator
     def clearAllEvents(self,userId):
         with self.connection.cursor() as cursor:
-            sqlDel = "DELETE FROM `events` WHERE id=%s"
+            sqlDel = "DELETE FROM `events` WHERE userId=%s"
             cursor.execute(sqlDel, (userId)) 
         self.connection.commit()
     @exceptionDecorator
@@ -127,21 +131,21 @@ def print_tb(e):
 def getHelpMessage():
     msg =  'Со мной ты никогда не забудешь поздравить друга с днем рождения или про годовщину свадьбы своих родителей!'
     msg+= '\nЯ понимаю сообщения в следующем формате:\n1)add <date> <message> - Добавить напоминание с сообщением <message> в день <date>'
-    msg+= '\n2)delete <date> - Удалить напоминание для дня <date>\n3)delete all - Удалить все напоминания\n4)print - Вывести список всех напоминаний'
+    msg+= '\n2)delete <index> - Удалить напоминание. Вместо <index> нужно указать порядковый номер записи, который можно узнать из команды print(см ниже)\n3)delete all - Удалить все напоминания\n4)print - Вывести список всех напоминаний'
     msg+= '\n5)help - вывести это сообщение'
     msg+= '\nФормат даты: DD.MM.YYYY HH:MM или DD.MM HH:MM. В первом случае напоминание сработает только один раз, во втором будет работать каждый год. Указывайте московское время.'
     msg+= '\nПримеры:\nadd 05.02.2021 12:00 День рождения Юли\n25 февраля в 12 часов дня по мск в 2021 году тебе придет напоминание от меня с текстом "Напоминаю: сегодня - День рождения Юли"'
     msg+= '\nadd 29.11 10:00 День матери\nКаждый год 29 ноября в 10 часов дня по мск тебе будет приходить напоминание от меня с текстом "Напоминаю: сегодня - День матери"'
     return msg
-def userInputToTimestamp(dateStr,timeStr):
+def userInputToTimestamp(dateStr,timeStr,newEvent):
     now = datetime.datetime.now()
     formatString = "%d.%m.%Y %H:%M"
     datetimeStr = dateStr+ ' ' + timeStr
     if len(dateStr) > 5:
-        newEvent['everyYear'] = False
+        newEvent["everyYear"] = False
         timestamp = dateToTimestamp(datetimeStr,formatString)
     else:
-        newEvent['everyYear'] = True
+        newEvent["everyYear"] = True
         checkDateTimeStr = dateStr + '.' + str(now.year) + ' ' + timeStr
         checkTimestamp = dateToTimestamp(checkDateTimeStr,formatString)
         if checkTimestamp > now.timestamp():
@@ -149,7 +153,7 @@ def userInputToTimestamp(dateStr,timeStr):
         else:
             checkDateTimeStr = dateStr + '.' + str(now.year + 1) + ' ' + timeStr
             timestamp =dateToTimestamp(checkDateTimeStr,formatString)
-    return timestamp                                                    
+    newEvent["timestamp"] = timestamp
 def formatEvents(events):
     resStr = ""
     index = 1
@@ -158,7 +162,7 @@ def formatEvents(events):
         index += 1
     return resStr
 def timestampToDate(timestamp):
-    return str(datetime.datetime.fromtimestamp(timestamp))
+    return datetime.datetime.fromtimestamp(timestamp).strftime("%d.%m.%Y %H:%M")
 def dateToTimestamp(dateTimeStr,formatString):
     try:
         return time.mktime(datetime.datetime.strptime(dateTimeStr,formatString).timetuple())
@@ -183,6 +187,7 @@ if __name__ == "__main__":
     nextTime.append(minTime)
     notifierWorker = Thread(target=notifierThread,args=(nextTime,sqlClient,lock,))
     notifierWorker.start()
+    print("main cycle started")
     while True:
         try:
             for event in longpoll.listen():
@@ -196,12 +201,11 @@ if __name__ == "__main__":
                                 newEvent = {}
                                 dateStr = request[1]
                                 timeStr = request[2]
-                                timestamp = userInputToTimestamp(dateStr,timeStr)
+                                userInputToTimestamp(dateStr,timeStr,newEvent)
                                 del request[0:3]
                                 message = (''.join(x + ' ' for x in request))
                                 newEvent['userId'] = event.user_id
                                 newEvent['randomId'] = event.random_id
-                                newEvent['timestamp'] = timestamp
                                 newEvent['message'] = message[:-1]
                                 sqlClient.addEvent(newEvent)
                                 lock.acquire()
@@ -209,17 +213,20 @@ if __name__ == "__main__":
                                 lock.release()             
                                 write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
                             elif request[0] == "print":
-                                write_msg(event.user_id,event.random_id,"Зарегистрированные события:\n" + formatEvents(sqlClient.getEventByUserId(event.user_id)))
+                                pr_events = sqlClient.getEventByUserId(event.user_id)
+                                msg = "Зарегистрированные события:\n" if len(pr_events) > 0 else "Нет зарегестрированных событий"
+                                write_msg(event.user_id,event.random_id,msg + formatEvents(pr_events))
                             elif request[0] == "delete":
                                 if request[1] == "all":
                                     sqlClient.clearAllEvents(event.user_id)
                                     write_msg(event.user_id,event.random_id, "Все события удалены!")
                                 else:
-                                    dateStr = request[1]
-                                    timeStr = request[2]
-                                    timestamp = userInputToTimestamp(dateStr,timeStr)
-                                    sqlClient.clearEventsByTimestamp(timestamp,event.user_id)
-                                    write_msg(event.user_id,event.random_id, "Событие удалено!")                                                          
+                                    try:
+                                        index = int(request[1]) - 1 #indexes for user starts with 1
+                                        sqlClient.clearEventsByIndex(index,event.user_id)
+                                        write_msg(event.user_id,event.random_id, "Событие удалено!")
+                                    except IndexError as e:
+                                        write_msg(event.user_id,event.random_id,"Некорректный номер записи")
                             else:
                                 write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
                         except ValueError as e:
