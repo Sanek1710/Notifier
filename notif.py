@@ -122,7 +122,13 @@ class SqlClient:
             cursor.execute(sql)
             result = cursor.fetchone()
             return result['min_timestamp']
-        self.connection.commit()   
+    @exceptionDecorator
+    def getEventsCount(self,userId):
+        with self.connection.cursor() as cursor:
+            sql ="SELECT COUNT(*) from events where userId=%s"
+            cursor.execute(sql,(userId))
+            result = cursor.fetchone()
+            return result["COUNT(*)"]
 def write_msg(user_id,random_id, message):
     vk.messages.send(user_id=user_id,random_id=random_id,message=message)
     print("Sending to user=" + str(user_id) + " message " + message)
@@ -134,8 +140,10 @@ def getHelpMessage():
     msg+= '\n2)delete <index> - Удалить напоминание. Вместо <index> нужно указать порядковый номер записи, который можно узнать из команды print(см ниже)\n3)delete all - Удалить все напоминания\n4)print - Вывести список всех напоминаний'
     msg+= '\n5)help - вывести это сообщение'
     msg+= '\nФормат даты: DD.MM.YYYY HH:MM или DD.MM HH:MM. В первом случае напоминание сработает только один раз, во втором будет работать каждый год. Указывайте московское время.'
-    msg+= '\nПримеры:\nadd 05.02.2021 12:00 День рождения Юли\n25 февраля в 12 часов дня по мск в 2021 году тебе придет напоминание от меня с текстом "Напоминаю: сегодня - День рождения Юли"'
+    msg+= '\nПримеры:\nadd 05.02.2021 12:00 День рождения Юли\n5 февраля в 12 часов дня по мск в 2021 году тебе придет напоминание от меня с текстом "Напоминаю: сегодня - День рождения Юли"'
     msg+= '\nadd 29.11 10:00 День матери\nКаждый год 29 ноября в 10 часов дня по мск тебе будет приходить напоминание от меня с текстом "Напоминаю: сегодня - День матери"'
+    msg += "\n!!!Внимание!!! Количество символов для одного сообщения - не более ста, количество событий для одного пользователя - не более " + str(server_config["maxEventsPerUser"])
+    msg += "\nДля увеличения кол-ва событий свяжитесь с автором(раздел контакты в группе)"
     return msg
 def userInputToTimestamp(dateStr,timeStr,newEvent):
     now = datetime.datetime.now()
@@ -173,13 +181,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--token', type=str,
                         help='your vk group token')
-    parser.add_argument('--dbConfig',
-                        help='path to config db file')
+    parser.add_argument('--config',
+                        help='path to config file')
     args = parser.parse_args()
     vk_session = vk_api.VkApi(token=args.token)
     longpoll = VkLongPoll(vk_session)
     vk = vk_session.get_api()
-    sqlClient = SqlClient(args.dbConfig)
+    config = configparser.ConfigParser()
+    config.read(args.config)
+    server_config = config["Server"]
+    sqlClient = SqlClient(args.config)
     usersList = sqlClient.getUsers()
     lock = Lock()
     nextTime =[]
@@ -192,18 +203,26 @@ if __name__ == "__main__":
         try:
             for event in longpoll.listen():
                 if event.type == VkEventType.MESSAGE_NEW and event.to_me:
+                    print(event.user_id, " got message ", event.text)
                     if str(event.user_id) in usersList:
                         try:
                             request = event.text.split()
                             if request[0] == "help":
                                 write_msg(event.user_id,event.random_id,getHelpMessage())
                             elif request[0] == "add":
+                                count = sqlClient.getEventsCount(event.user_id)
+                                if count > int(server_config["maxEventsPerUser"]):
+                                    write_msg(event.user_id,event.random_id, "Превышен лимит событий на пользователя. Удалите лишние события или свяжитесь с автором для увеличения лимита")
+                                    continue
                                 newEvent = {}
                                 dateStr = request[1]
                                 timeStr = request[2]
                                 userInputToTimestamp(dateStr,timeStr,newEvent)
                                 del request[0:3]
                                 message = (''.join(x + ' ' for x in request))
+                                if len(message) > int(server_config["maxSymbolsPerMessage"]):
+                                    write_msg(event.user_id,event.random_id, "Слишком длинное сообщение")
+                                    continue
                                 newEvent['userId'] = event.user_id
                                 newEvent['randomId'] = event.random_id
                                 newEvent['message'] = message[:-1]
