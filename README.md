@@ -4,10 +4,12 @@ https://vk.com/notifier144
 # Использование
 Запустить скрипт notif.py --token=groupToken --dbConfig=pathToDbConfig
 # Формат конифга для бд
-host user password dbname
-Пример:
-127.0.0.1 root secretRoot notif
+Конфиг хранится в формате ini
+В начале должна быть секция DB
+[DB]
+host=host
+user=user
+password=password
+db=dbname
 # TODO
-1) Унифицировать формат даты в help и в add
-2) Добавить команду add default для стандартных праздников
-3) Сделать конфиг нормальным инишником без кастомного парсинга
+1) Добавить команду add default для стандартных праздников
