@@ -4,7 +4,7 @@ https://vk.com/notifier144
 ## Использование
 Запуск скрипта notif.py:
 ```python
-python3 notif.py --token=groupToken --dbConfig=pathToDbConfig
+python3 notif.py --token=groupToken --config=pathToConfig
 ```
 ## Формат конифга для бд
 Конфиг хранится в формате ini
@@ -15,9 +15,12 @@ host=host
 user=user
 password=password
 db=dbname
+
+[Server]
+maxEventsPerUser=10
+maxSymbolsPerMessage=100
 ```
 ## TODO
 1) Добавить команду add default для стандартных праздников
 2) Описать формат базы данных
-3) Впилить ограничение по кол-ву симоволов в сообщении
-4) Впилить ограинчение по кол-ву напоминаний для пользователя
+3) Впилить список донатеров
