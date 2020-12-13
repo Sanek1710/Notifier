@@ -18,6 +18,22 @@ def exceptionDecorator(func):
             print_tb(e)
             raise (e)
     return wrapper
+def sqlExceptionDecorator(func):
+    def handle_reconnect(self,text,*args, **kwargs):
+        print(text)
+        self.connect()
+        return func(self,*args, **kwargs)
+    def wrapper(self,*args, **kwargs):
+        try:
+            return func(self,*args, **kwargs)
+        except BrokenPipeError as e:
+            handle_reconnect(self,"BrokenPipeError. Trying to reconnect...",*args, **kwargs)
+        except pymysql.err.InterfaceError as e:
+            handle_reconnect(self,"InterfaceError. Trying to reconnect...",*args, **kwargs)
+        except Exception as e:
+            print_tb(e)
+            raise (e)
+    return wrapper
 @exceptionDecorator
 def sendNotifies(events):
     for event in events:
@@ -42,26 +58,28 @@ class SqlClient:
     def __init__(self,configFile):
         config = configparser.ConfigParser()
         config.read(configFile)
-        db_config = config["DB"]
-        self.connection = pymysql.connect(host=db_config["host"],
-                             user=db_config["user"],
-                             password=db_config["password"],
-                             db=db_config["db"],
+        self.db_config = config["DB"]
+        self.connect()
+    def connect(self):
+        self.connection = pymysql.connect(host=self.db_config["host"],
+                             user=self.db_config["user"],
+                             password=self.db_config["password"],
+                             db=self.db_config["db"],
                              charset='utf8mb4',
                              cursorclass=pymysql.cursors.DictCursor)
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def addUser(self,userId):
         with self.connection.cursor() as cursor:
             sql = "INSERT INTO `users` (`userId`) VALUES (%s)"
             cursor.execute(sql, (userId)) 
         self.connection.commit()
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def addEvent(self,event):
         with self.connection.cursor() as cursor:
             sql = "INSERT INTO `events` (`userId`, `randomId`, `timestamp`,`message`,`everyYear`) VALUES (%s,%s,%s,%s,%s)"
             cursor.execute(sql, (event['userId'],event['randomId'],event['timestamp'],event['message'],event['everyYear'])) 
         self.connection.commit()
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def getUsers(self):
         result = []
         with self.connection.cursor() as cursor:
@@ -69,7 +87,7 @@ class SqlClient:
             cursor.execute(sql)
             result = [x['userId'] for x in cursor.fetchall()]
         return result
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def getEventByUserId(self, userId):
         result = []
         with self.connection.cursor() as cursor:
@@ -77,7 +95,7 @@ class SqlClient:
             cursor.execute(sql,(str(userId)))
             result = cursor.fetchall()
         return result  
-    @exceptionDecorator      
+    @sqlExceptionDecorator      
     def getEventsByTimestamp(self,timestamp):   
         result = []
         with self.connection.cursor() as cursor:
@@ -85,7 +103,7 @@ class SqlClient:
             cursor.execute(sql,(str(timestamp)))
             result = cursor.fetchall()
         return result 
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def clearEventsByEvents(self,events):
         with self.connection.cursor() as cursor:
             sqlDel = "DELETE FROM `events` WHERE id=%s"
@@ -99,7 +117,7 @@ class SqlClient:
                     newTimestamp =newDate.timestamp()
                     cursor.execute(sqlUpdate, (newTimestamp,event["id"])) 
         self.connection.commit()
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def clearEventsByIndex(self,index,userId):
         events = self.getEventByUserId(userId)
         if (index < 0 or index >= len(events)): #for userfriendly i-face
@@ -109,20 +127,20 @@ class SqlClient:
             sqlDel = "DELETE FROM `events` WHERE id=%s"
             cursor.execute(sqlDel, (events[index]["id"]))
         self.connection.commit()
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def clearAllEvents(self,userId):
         with self.connection.cursor() as cursor:
             sqlDel = "DELETE FROM `events` WHERE userId=%s"
             cursor.execute(sqlDel, (userId)) 
         self.connection.commit()
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def getMinTimestamp(self):
         with self.connection.cursor() as cursor:
             sql = "SELECT MIN(timestamp) as min_timestamp FROM `events`"
             cursor.execute(sql)
             result = cursor.fetchone()
             return result['min_timestamp']
-    @exceptionDecorator
+    @sqlExceptionDecorator
     def getEventsCount(self,userId):
         with self.connection.cursor() as cursor:
             sql ="SELECT COUNT(*) from events where userId=%s"
