@@ -26,8 +26,8 @@ def sqlExceptionDecorator(func):
     def wrapper(self,*args, **kwargs):
         try:
             return func(self,*args, **kwargs)
-        except BrokenPipeError as e:
-            handle_reconnect(self,"BrokenPipeError. Trying to reconnect...",*args, **kwargs)
+        except pymysql.err.OperationalError as e:
+            handle_reconnect(self,"OperationalError. Trying to reconnect...",*args, **kwargs)
         except pymysql.err.InterfaceError as e:
             handle_reconnect(self,"InterfaceError. Trying to reconnect...",*args, **kwargs)
         except Exception as e:
@@ -147,6 +147,13 @@ class SqlClient:
             cursor.execute(sql,(userId))
             result = cursor.fetchone()
             return result["COUNT(*)"]
+    @sqlExceptionDecorator
+    def checkVipUser(self,userId):
+        with self.connection.cursor() as cursor:
+            sql ="SELECT vip from users where userId=%s"
+            cursor.execute(sql,(userId))
+            result = cursor.fetchone()
+            return bool(result["vip"])
 def write_msg(user_id,random_id, message):
     vk.messages.send(user_id=user_id,random_id=random_id,message=message)
     print("Sending to user=" + str(user_id) + " message " + message)
@@ -216,6 +223,12 @@ if __name__ == "__main__":
     nextTime.append(minTime)
     notifierWorker = Thread(target=notifierThread,args=(nextTime,sqlClient,lock,))
     notifierWorker.start()
+    maxEventsCountDict ={}
+    for userId in usersList:
+        maxEventsCount = int(server_config["maxEventsPerUser"])
+        if sqlClient.checkVipUser(userId):
+            maxEventsCount = int(server_config["maxEventsPerVip"])
+        maxEventsCountDict[userId] = maxEventsCount
     print("main cycle started")
     while True:
         try:
@@ -229,7 +242,7 @@ if __name__ == "__main__":
                                 write_msg(event.user_id,event.random_id,getHelpMessage())
                             elif request[0] == "add":
                                 count = sqlClient.getEventsCount(event.user_id)
-                                if count > int(server_config["maxEventsPerUser"]):
+                                if count > maxEventsCountDict[str(event.user_id)]:
                                     write_msg(event.user_id,event.random_id, "Превышен лимит событий на пользователя. Удалите лишние события или свяжитесь с автором для увеличения лимита")
                                     continue
                                 newEvent = {}
@@ -245,14 +258,15 @@ if __name__ == "__main__":
                                 newEvent['randomId'] = event.random_id
                                 newEvent['message'] = message[:-1]
                                 sqlClient.addEvent(newEvent)
+                                count += 1 
                                 lock.acquire()
                                 nextTime[0] = sqlClient.getMinTimestamp()
                                 lock.release()             
-                                write_msg(event.user_id, event.random_id,'Событие зарегистрировано!')
+                                write_msg(event.user_id, event.random_id,'Событие зарегистрировано! Осталось событий: ' + str(maxEventsCountDict[str(event.user_id)] - count))
                             elif request[0] == "print":
                                 pr_events = sqlClient.getEventByUserId(event.user_id)
                                 msg = "Зарегистрированные события:\n" if len(pr_events) > 0 else "Нет зарегестрированных событий"
-                                write_msg(event.user_id,event.random_id,msg + formatEvents(pr_events))
+                                write_msg(event.user_id,event.random_id,msg + formatEvents(pr_events) + "Осталось событий: " + str(maxEventsCountDict[str(event.user_id)] - sqlClient.getEventsCount(event.user_id)))
                             elif request[0] == "delete":
                                 if request[1] == "all":
                                     sqlClient.clearAllEvents(event.user_id)
@@ -261,7 +275,7 @@ if __name__ == "__main__":
                                     try:
                                         index = int(request[1]) - 1 #indexes for user starts with 1
                                         sqlClient.clearEventsByIndex(index,event.user_id)
-                                        write_msg(event.user_id,event.random_id, "Событие удалено!")
+                                        write_msg(event.user_id,event.random_id, "Событие удалено! Осталось событий: " + str(maxEventsCountDict[str(event.user_id)] - sqlClient.getEventsCount(event.user_id)))
                                     except IndexError as e:
                                         write_msg(event.user_id,event.random_id,"Некорректный номер записи")
                             else:
@@ -275,6 +289,8 @@ if __name__ == "__main__":
                         write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
                         sqlClient.addUser(event.user_id)
                         usersList.append(str(event.user_id))
+        except requests.exceptions.ReadTimeout:
+            print("request timeout")
         except Exception as e:
             print_tb(e)
 
