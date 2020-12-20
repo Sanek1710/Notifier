@@ -18,6 +18,7 @@ db=dbname
 
 [Server]
 maxEventsPerUser=10
+maxEventsPerUser=50
 maxSymbolsPerMessage=100
 ```
 ## TODO
