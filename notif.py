@@ -22,6 +22,7 @@ def sqlExceptionDecorator(func):
     def handle_reconnect(self,text,*args, **kwargs):
         print(text)
         self.connect()
+        time.sleep(1)
         return func(self,*args, **kwargs)
     def wrapper(self,*args, **kwargs):
         try:
