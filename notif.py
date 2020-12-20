@@ -10,6 +10,8 @@ from vk_api.longpoll import VkLongPoll, VkEventType
 import pymysql.cursors
 import argparse
 import configparser
+class DateFormatError(Exception):
+    pass
 def exceptionDecorator(func):
     def wrapper(*args, **kwargs):
         try:
@@ -202,7 +204,7 @@ def dateToTimestamp(dateTimeStr,formatString):
         return time.mktime(datetime.datetime.strptime(dateTimeStr,formatString).timetuple())
     except ValueError as e:
         print_tb(e)
-        raise ValueError("Неверный формат даты")
+        raise DateFormatError("Неверный формат даты")
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--token', type=str,
@@ -239,9 +241,10 @@ if __name__ == "__main__":
                     if str(event.user_id) in usersList:
                         try:
                             request = event.text.split()
-                            if request[0] == "help":
+                            command = request[0].lower()
+                            if command == "help":
                                 write_msg(event.user_id,event.random_id,getHelpMessage())
-                            elif request[0] == "add":
+                            elif command == "add":
                                 count = sqlClient.getEventsCount(event.user_id)
                                 if count > maxEventsCountDict[str(event.user_id)]:
                                     write_msg(event.user_id,event.random_id, "Превышен лимит событий на пользователя. Удалите лишние события или свяжитесь с автором для увеличения лимита")
@@ -264,11 +267,11 @@ if __name__ == "__main__":
                                 nextTime[0] = sqlClient.getMinTimestamp()
                                 lock.release()             
                                 write_msg(event.user_id, event.random_id,'Событие зарегистрировано! Осталось событий: ' + str(maxEventsCountDict[str(event.user_id)] - count))
-                            elif request[0] == "print":
+                            elif command == "print":
                                 pr_events = sqlClient.getEventByUserId(event.user_id)
                                 msg = "Зарегистрированные события:\n" if len(pr_events) > 0 else "Нет зарегестрированных событий"
                                 write_msg(event.user_id,event.random_id,msg + formatEvents(pr_events) + "Осталось событий: " + str(maxEventsCountDict[str(event.user_id)] - sqlClient.getEventsCount(event.user_id)))
-                            elif request[0] == "delete":
+                            elif command == "delete":
                                 if request[1] == "all":
                                     sqlClient.clearAllEvents(event.user_id)
                                     write_msg(event.user_id,event.random_id, "Все события удалены!")
@@ -281,7 +284,7 @@ if __name__ == "__main__":
                                         write_msg(event.user_id,event.random_id,"Некорректный номер записи")
                             else:
                                 write_msg(event.user_id,event.random_id, "Неизвестный формат сообщения")
-                        except ValueError as e:
+                        except DateFormatError as e:
                             write_msg(event.user_id,event.random_id,str(e))
                         except Exception as e:
                             print_tb(e)
