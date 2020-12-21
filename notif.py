@@ -269,7 +269,7 @@ if __name__ == "__main__":
                                 write_msg(event.user_id, event.random_id,'Событие зарегистрировано! Осталось событий: ' + str(maxEventsCountDict[str(event.user_id)] - count))
                             elif command == "print":
                                 pr_events = sqlClient.getEventByUserId(event.user_id)
-                                msg = "Зарегистрированные события:\n" if len(pr_events) > 0 else "Нет зарегестрированных событий"
+                                msg = "Зарегистрированные события:\n" if len(pr_events) > 0 else "Нет зарегестрированных событий\n"
                                 write_msg(event.user_id,event.random_id,msg + formatEvents(pr_events) + "Осталось событий: " + str(maxEventsCountDict[str(event.user_id)] - sqlClient.getEventsCount(event.user_id)))
                             elif command == "delete":
                                 if request[1] == "all":
@@ -293,6 +293,11 @@ if __name__ == "__main__":
                         write_msg(event.user_id,event.random_id,'И тебе привет! '+ getHelpMessage())
                         sqlClient.addUser(event.user_id)
                         usersList.append(str(event.user_id))
+                        maxEventsCount = int(server_config["maxEventsPerUser"])
+                        if sqlClient.checkVipUser(event.user_id):
+                            maxEventsCount = int(server_config["maxEventsPerVip"])
+                        maxEventsCountDict[event.user_id] = maxEventsCount
+                        
         except requests.exceptions.ReadTimeout:
             print("request timeout")
         except Exception as e:
