@@ -238,7 +238,7 @@ if __name__ == "__main__":
             for event in longpoll.listen():
                 if event.type == VkEventType.MESSAGE_NEW and event.to_me:
                     print(event.user_id, " got message ", event.text)
-                    if str(event.user_id) in usersList:
+                    if str(event.user_id) in usersList: #TODO: refact str using
                         try:
                             request = event.text.split()
                             command = request[0].lower()
