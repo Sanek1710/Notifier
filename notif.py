@@ -296,7 +296,7 @@ if __name__ == "__main__":
                         maxEventsCount = int(server_config["maxEventsPerUser"])
                         if sqlClient.checkVipUser(event.user_id):
                             maxEventsCount = int(server_config["maxEventsPerVip"])
-                        maxEventsCountDict[event.user_id] = maxEventsCount
+                        maxEventsCountDict[str(event.user_id)] = maxEventsCount
                         
         except requests.exceptions.ReadTimeout:
             print("request timeout")
