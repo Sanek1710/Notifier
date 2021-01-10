@@ -30,9 +30,9 @@ def sqlExceptionDecorator(func):
         try:
             return func(self,*args, **kwargs)
         except pymysql.err.OperationalError as e:
-            handle_reconnect(self,"OperationalError. Trying to reconnect...",*args, **kwargs)
+            return handle_reconnect(self,"OperationalError. Trying to reconnect...",*args, **kwargs)
         except pymysql.err.InterfaceError as e:
-            handle_reconnect(self,"InterfaceError. Trying to reconnect...",*args, **kwargs)
+            return handle_reconnect(self,"InterfaceError. Trying to reconnect...",*args, **kwargs)
         except Exception as e:
             print_tb(e)
             raise (e)
